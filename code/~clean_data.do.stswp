@@ -13,7 +13,7 @@ X =
 
 
 * Load 1980 data 
-import spss using "/Users/anyamarchenko/CEGA Dropbox/Anya Marchenko/metrics_pset2_fall2023_data/m_d_806.sav"
+import spss using "/Users/anyamarchenko/CEGA Dropbox/Anya Marchenko/metrics_pset2_fall2023_data/m_d_806.sav", replace
 
 keep FAMINC KIDCOUNT RACEM AGEM SEXK SEX2ND YOBM YOBK
 
@@ -36,10 +36,9 @@ gen d = 0
 replace d = 1 if kidcount > 2 //D = 1 if 3 or more children, D = 0 ow
 
 * Gen IV Z
-gen z = 0
+drop if sex2nd == . 
+gen z = 0  //if there is a second kid
 replace z = 1 if sex2nd == sexk
-
-drop 
 
 export delimited using "/Users/anyamarchenko/CEGA Dropbox/Anya Marchenko/metrics_pset2_fall2023_data/anya_cleaned.csv", replace
 
