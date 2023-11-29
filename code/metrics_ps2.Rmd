@@ -1,0 +1,69 @@
+---
+title: "Applied Metrics Empirical P-Set 2: Fall 2023"
+output: pdf_document
+date: "2023-11-29"
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, tidy.opts=list(width.cutoff=60), tidy=TRUE)
+```
+
+### Question 1 - Estimate the propensity score by a probit regression
+```{r }
+# Clear all
+rm(list = ls())
+
+# load and require packages
+pacman::p_load(foreign, tidyverse, here, randomForest)
+
+# Load data
+data <- read.csv(here("data/anya_cleaned.csv"))
+
+# Fit probit
+x <- c("I(racem)", "I(agem)", "agemomfirst", "I(sexk)") # race, current age, agemomfirst, sex first child
+
+probit_model <- glm(I(racem) + I(agem) + agemomfirst + I(sexk) + z, 
+                    data = data, 
+                    family = binomial(link = "probit"))
+
+# Predict propensity scores
+data$prop_score <- predict(probit_model, type = "response")
+
+data$prop_score
+```
+
+
+### Question 2 - Estimate by OLS
+
+```{r }
+# Fit OLS
+ols <- lm(lnincome ~ I(racem) + I(agem) + agemomfirst + I(sexk) + 
+            prop_score*(I(racem) + I(agem) + agemomfirst + I(sexk)) + 
+            prop_score + (prop_score)^2 + prop_score^3, 
+                    data = data)
+
+summary(ols)
+```
+
+### Question 2a - Relate structural equation and probit regression
+
+Suppose we specify the potential outcome equations as $Y_i(1) = X'_i \theta_1 + \epsilon_{1i}$ and $Y_i(0) = X'_i \theta_0 + \epsilon_{0i}$, and the structural selection equation as $D_i = 1 \{u(X_i,Z_i) \geq V_i \}$. where $u(X_i,Z_i) - V_i$ is the latent utility derived from additional children.
+
+
+
+```{r }
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
