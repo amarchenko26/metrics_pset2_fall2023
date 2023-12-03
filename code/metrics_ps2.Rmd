@@ -1,78 +1,57 @@
 ---
-title: "Applied Metrics Empirical P-Set 2: Fall 2023"
+title: "Applied Metrics Empirical P-Set 2, Fall 2023"
 output: pdf_document
 date: "2023-11-29"
 ---
-
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, tidy.opts=list(width.cutoff=60), tidy=TRUE)
 ```
 
-### Question 1 - Estimate the propensity score by a probit regression
+### Load data
+
 ```{r }
 # Clear all
 rm(list = ls())
 
 # load and require packages
-pacman::p_load(foreign, tidyverse, here, randomForest)
+pacman::p_load(foreign, tidyverse, here, randomForest, boot)
 
 # Load data
-data <- read.csv(here("data/anya_cleaned.csv"))
+data <- read.csv(here("data/andres_cleaned.csv"))
+data$X <- NULL
 
-# Fit probit
-probit_model <- glm(d ~ I(racem) + I(agem) + agemomfirst + I(sexk) + z, 
-                    data = data, 
-                    family = binomial(link = "probit"))
-
-# Predict propensity scores
-data$prop_score <- predict(probit_model, type = "response")
-
-```
-
-
-### Question 2 - Estimate by OLS
-
-```{r }
-# Fit OLS
-ols <- lm(lnincome ~ I(racem) + I(agem) + agemomfirst + I(sexk) + 
-            prop_score*(I(racem) + I(agem) + agemomfirst + I(sexk)) + 
-            prop_score + (prop_score)^2 + prop_score^3, 
-                    data = data)
-
-summary(ols)
 ```
 
 ### Question 2a - Relate structural equation and probit regression
 
 Suppose we specify the potential outcome equations as $Y_i(1) = X'_i \theta_1 + \epsilon_{1i}$ and $Y_i(0) = X'_i \theta_0 + \epsilon_{0i}$, and the structural selection equation as $D_i = 1 \{u(X_i,Z_i) \geq V_i \}$. where $u(X_i,Z_i) - V_i$ is the latent utility derived from additional children.
 
-The structural selection equation describes the switch from $D = 0$ to $D=1$ in terms of utility, i.e., whether, as a function of your observables and instrument, the family has a higher utility than some level of having more than three children. The propensity score quantifies this probability, capturing the likelihood, given your observables and instrument value, of having $D = 1$. 
-
-
+The structural selection equation describes the switch from $D = 0$ to $D=1$ in terms of utility, i.e., whether, as a function of your observables and instrument, the family has a higher utility than some level of having more than three children. The propensity score quantifies this probability, capturing the likelihood, given your observables and instrument value, of having $D = 1$.
 
 ### Question 2b - Assumptions for MTE
 
-Clarify a set of assumptions that the marginal treatment effect $M(x,u)$, $u \in (0,1)$ can be identified by the derivative of the OLS regression equation WRT the propensity score: 
-$$MTE(x, u) = \frac{\partial}{\partial p}\bigg|_{p=u} \left( x'\beta_0 + px'\beta_1 + \kappa_1p + \kappa_2p^2 + \kappa_3p^3 \right)$$
+Clarify a set of assumptions that the marginal treatment effect $M(x,u)$, $u \in (0,1)$ can be identified by the derivative of the OLS regression equation WRT the propensity score: $$MTE(x, u) = \frac{\partial}{\partial p}\bigg|_{p=u} \left( x'\beta_0 + px'\beta_1 + \kappa_1p + \kappa_2p^2 + \kappa_3p^3 \right)$$
 
 The assumptions are: XXXXX
-
-
-
 
 ### Question 2c - Estimate propensity score
 
 Estimate the propensity score as instructed above, and assess whether the coefficient of the instrumental variable in the probit regression is significantly different from zero or not.
 
-Yes, we see that the z-value for the instrument is extremely large at 49, and very significant. So we have confidence that the instrument is predicting treatment. 
+Yes, we see that the z-value for the instrument is extremely large at 37, and very significant. So we have confidence that the instrument is predicting treatment.
 
 ```{r }
+# Fit probit
+probit_model <- glm(d ~ blackm + hispm + othracem + agem1 + agefstm + boy1st + z, 
+                    data = data, 
+                    family = binomial(link = "probit"))
+
+# Predict propensity scores
+data$prop_score <- predict(probit_model, type = "response")
+
 summary(probit_model)
-
 ```
-
-
 
 ### Question 2d - Plot histogram of estimated propensity scores
 
@@ -85,18 +64,78 @@ hist(data$prop_score,
      border = "black")
 ```
 
-
-
-
 ```{r }
 summary(probit_model)
 ```
 
+### Question 2e - Estimate by OLS, bootstrap standard errors
 
+Report the OLS estimates of the coefficients in the regression equation of (2) and their bootstrap standard errors with 1000 bootstrap replications.
 
+```{r }
+# Fit OLS
+ols <- lm(y ~ blackm + hispm + othracem + agem1 + agefstm + boy1st + 
+            prop_score*(blackm + hispm + othracem + agem1 + agefstm + boy1st) + 
+            prop_score + (prop_score)^2 + prop_score^3, 
+                    data = data)
 
+summary(ols)
 
+# Function to fit model on bootstrap sample
+boot_fn <- function(data, index) {
+  fit <- lm(y ~ blackm + hispm + othracem + agem1 + agefstm + boy1st + 
+            prop_score*(blackm + hispm + othracem + agem1 + agefstm + boy1st) + 
+            prop_score + I(prop_score^2) + I(prop_score^3), 
+            data = data, subset = index)
+  return(coef(fit))
+}
 
+# Perform bootstrap
+set.seed(123) # For reproducibility
+boot_results <- boot(data, boot_fn, R = 1000)
 
+# Calculate standard errors
+boot_se <- apply(boot_results$t, 2, sd)
+```
 
+### Question 2f - Calculate MTE and their CI
 
+Plot the MTE estimates (as a function of u ∈ [0,1]) and pointwise confidence intervals,
+holding X constant at its sample mean values. The confidence intervals are constructed
+using the boostrap results.
+
+```{r}
+# Step 1: Calculate the means of the covariates
+covariate_means <- colMeans(data[, c("blackm", "hispm", "othracem", "agem1", "agefstm", "boy1st")], na.rm = TRUE)
+
+# Step 2: Fit the regression model (already done)
+
+# Step 3 & 4: Use the fitted model to make predictions and calculate partial derivatives
+prop_scores <- seq(0, 1, length.out = 100) # Creating a sequence from 0 to 1
+marginal_effects <- numeric(length(prop_scores))
+
+for (i in 1:length(prop_scores)) {
+    # Create a new data frame with the mean values and the current prop_score
+    new_data <- as.data.frame(t(covariate_means))
+    new_data$prop_score <- prop_scores[i]
+    new_data$I_prop_score_2 <- prop_scores[i]^2
+    new_data$I_prop_score_3 <- prop_scores[i]^3
+    
+    # Predict using the new data
+    pred <- predict(ols, new_data)
+
+    # Calculate the marginal effect (partial derivative)
+    # Assuming a linear relationship, this is equivalent to the coefficient of prop_score
+    marginal_effects[i] <- coef(ols)["prop_score"] + 2 * coef(ols)["I(prop_score^2)"] * prop_scores[i] + 3 * coef(ols)["I(prop_score^3)"] * prop_scores[i]^2
+}
+
+# Step 5: Plot the results
+plot(prop_scores, marginal_effects, type = "l", xlab = "Propensity Score", ylab = "Marginal Treatment Effect")
+
+```
+
+### Question 2x -
+
+```{r}
+
+```
