@@ -15,27 +15,30 @@ knitr::opts_chunk$set(echo = TRUE, tidy.opts=list(width.cutoff=60), tidy=TRUE)
 rm(list = ls())
 
 # load and require packages
-pacman::p_load(foreign, tidyverse, here, randomForest, boot)
+pacman::p_load(foreign, tidyverse, here, randomForest, boot, MASS)
 
 # Load data
 data <- read.csv(here("data/andres_cleaned.csv"))
 data$X <- NULL
 
+set.seed(1234) # For reproducibility
+
+
 ```
 
-### Question 2a - Relate structural equation and probit regression
+### Question 1a - Relate structural equation and probit regression
 
 Suppose we specify the potential outcome equations as $Y_i(1) = X'_i \theta_1 + \epsilon_{1i}$ and $Y_i(0) = X'_i \theta_0 + \epsilon_{0i}$, and the structural selection equation as $D_i = 1 \{u(X_i,Z_i) \geq V_i \}$. where $u(X_i,Z_i) - V_i$ is the latent utility derived from additional children.
 
 The structural selection equation describes the switch from $D = 0$ to $D=1$ in terms of utility, i.e., whether, as a function of your observables and instrument, the family has a higher utility than some level of having more than three children. The propensity score quantifies this probability, capturing the likelihood, given your observables and instrument value, of having $D = 1$.
 
-### Question 2b - Assumptions for MTE
+### Question 1b - Assumptions for MTE
 
 Clarify a set of assumptions that the marginal treatment effect $M(x,u)$, $u \in (0,1)$ can be identified by the derivative of the OLS regression equation WRT the propensity score: $$MTE(x, u) = \frac{\partial}{\partial p}\bigg|_{p=u} \left( x'\beta_0 + px'\beta_1 + \kappa_1p + \kappa_2p^2 + \kappa_3p^3 \right)$$
 
 The assumptions are: XXXXX
 
-### Question 2c - Estimate propensity score
+### Question 1c - Estimate propensity score
 
 Estimate the propensity score as instructed above, and assess whether the coefficient of the instrumental variable in the probit regression is significantly different from zero or not.
 
@@ -53,7 +56,7 @@ data$prop_score <- predict(probit_model, type = "response")
 summary(probit_model)
 ```
 
-### Question 2d - Plot histogram of estimated propensity scores
+### Question 1d - Plot histogram of estimated propensity scores
 
 ```{r }
 hist(data$prop_score, 
@@ -68,7 +71,7 @@ hist(data$prop_score,
 summary(probit_model)
 ```
 
-### Question 2e - Estimate by OLS, bootstrap standard errors
+### Question 1e - Estimate by OLS, bootstrap standard errors
 
 Report the OLS estimates of the coefficients in the regression equation of (2) and their bootstrap standard errors with 1000 bootstrap replications.
 
@@ -76,7 +79,7 @@ Report the OLS estimates of the coefficients in the regression equation of (2) a
 # Fit OLS
 ols <- lm(y ~ blackm + hispm + othracem + agem1 + agefstm + boy1st + 
             prop_score*(blackm + hispm + othracem + agem1 + agefstm + boy1st) + 
-            prop_score + (prop_score)^2 + prop_score^3, 
+            prop_score + I(prop_score^2) + I(prop_score^3), 
                     data = data)
 
 summary(ols)
@@ -91,51 +94,156 @@ boot_fn <- function(data, index) {
 }
 
 # Perform bootstrap
-set.seed(123) # For reproducibility
 boot_results <- boot(data, boot_fn, R = 1000)
 
 # Calculate standard errors
 boot_se <- apply(boot_results$t, 2, sd)
 ```
 
-### Question 2f - Calculate MTE and their CI
+### Question 1f - Calculate MTE and their CI
 
 Plot the MTE estimates (as a function of u ∈ [0,1]) and pointwise confidence intervals,
 holding X constant at its sample mean values. The confidence intervals are constructed
 using the boostrap results.
 
 ```{r}
+
 # Step 1: Calculate the means of the covariates
 covariate_means <- colMeans(data[, c("blackm", "hispm", "othracem", "agem1", "agefstm", "boy1st")], na.rm = TRUE)
 
-# Step 2: Fit the regression model (already done)
+# Calculate the first term of the derivative (x prime times beta1)
+beta1 <- coef(ols)[11:16]
+xprime <- matrix(covariate_means, nrow = 1, ncol = 6) #transpose to make 1x6
+beta1 <- matrix(beta1, nrow = 6, ncol = 1) #transpose to make 6x1
+xbeta1 <- xprime %*% beta1
 
-# Step 3 & 4: Use the fitted model to make predictions and calculate partial derivatives
-prop_scores <- seq(0, 1, length.out = 100) # Creating a sequence from 0 to 1
-marginal_effects <- numeric(length(prop_scores))
+kappa1 <- coef(ols)[8] #prop_score coef
+kappa2 <- coef(ols)[9] #prop_score^2 coef
+kappa3 <- coef(ols)[10] #prop_score^3 coef
 
-for (i in 1:length(prop_scores)) {
-    # Create a new data frame with the mean values and the current prop_score
-    new_data <- as.data.frame(t(covariate_means))
-    new_data$prop_score <- prop_scores[i]
-    new_data$I_prop_score_2 <- prop_scores[i]^2
-    new_data$I_prop_score_3 <- prop_scores[i]^3
-    
-    # Predict using the new data
-    pred <- predict(ols, new_data)
+marginal_effects <- as.vector(xbeta1) + as.vector(kappa1) + (2 * as.vector(kappa2) * data$prop_score) + (3 * as.vector(kappa3) * (data$prop_score)^2)
 
-    # Calculate the marginal effect (partial derivative)
-    # Assuming a linear relationship, this is equivalent to the coefficient of prop_score
-    marginal_effects[i] <- coef(ols)["prop_score"] + 2 * coef(ols)["I(prop_score^2)"] * prop_scores[i] + 3 * coef(ols)["I(prop_score^3)"] * prop_scores[i]^2
-}
+x_axis <- sort(data$prop_score)
 
-# Step 5: Plot the results
-plot(prop_scores, marginal_effects, type = "l", xlab = "Propensity Score", ylab = "Marginal Treatment Effect")
+# Create a new data frame for plotting
+plot_data <- data.frame(xvar = sort(data$prop_score), marginal_effects = marginal_effects)
+
+# Use ggplot to create the scatterplot
+ggplot(plot_data, aes(x = xvar, y = marginal_effects)) +
+  geom_point() +
+  theme_minimal() +
+  labs(x = "u", y = "Marginal Effects", 
+       title = "Scatterplot of Marginal Effects vs. Unobserved Heterogeneity u")
+
+
+#m0 and m1 are formulas specifying the MTR functions for the untreated and treated arms, respectively. The symbol u in the formula refers to the unobservable latent variable in the selection equation.
+#ivlike indicates the regressions to be run to create moments to which the model is fit.
+
+mte <- ivmte(data = data,
+           target = "att",
+           m0 = ~ u + blackm + hispm + othracem + agem1 + agefstm + boy1st,
+           m1 = ~ u + blackm + hispm + othracem + agem1 + agefstm + boy1st,
+           ivlike = c(y ~ d),
+           propensity = d ~ blackm + hispm + othracem + agem1 + agefstm + boy1st + z,
+#           bootstraps = 50, 
+           link = "probit")
+
+mte$bounds.ci
 
 ```
 
-### Question 2x -
+### Question 1g - Interpret
+
+Based on the presented estimates, interpret heterogeneity of the marginal treatment effects.
+What type of parent has a larger causal effect than others? In your answer, be explicit
+about how to interpret u.
+
+In this case, the marginal treatment effect is the difference betewen the marginal treatment response functions of treated and untreated individuals, conditional on \$U = u\$ and \$X_i = x\$. $u$ is the unobservable latent variable in the selection equation. That is, \$u\$ captures the unobservable propensity to take up treatment. The monotonicity assumption allows us to order individuals in a one-dimensional manner according to their latent propensity to take up treatment.
+
+If MTE is declining in \$u\$, that means that people who are less likely to choose treatment experience smaller treatment effects than those who are more likely to choose treatment.
+
+QUESTION - is it that $u$ is the unobservable heterogeneity ehre?
+
+### Question 2 -
 
 ```{r}
+
+```
+
+### Question 2 
+
+```{r}
+set.seed(1234)
+
+# Set the number of variables and observations
+n_vars <- 20
+n_obs <- 500
+
+# Create the variance matrix sigma
+sigma <- matrix(0, nrow = n_vars, ncol = n_vars)
+for (i in 1:n_vars) {
+  for (j in 1:n_vars) {
+    sigma[i, j] <- 0.8^abs(j - i)
+  }
+}
+
+# Ensure diagonal entries are 1
+diag(sigma) <- 1
+
+# Generate the data
+data2 <- as.data.frame(mvrnorm(n = n_obs, mu = rep(0, n_vars), Sigma = sigma)) # Need MASS package
+
+###################################
+
+# Set up
+a0 <- 1
+a1 <- 0.25
+b0 <- 1
+b1 <- 0.25
+tau <- 0.5
+
+# Define m and V
+m <- function(X1, X3){
+    return(a0*X1 + a1*(exp(X3)/(1+exp(X3))))
+}
+
+V_fun <- function(X1, X3){
+  zeta <- rnorm(500,0,1)
+  return(m(X1, X3) + zeta)
+}
+
+V <- V_fun(data2$V1, data2$V3)
+data2$D <- ifelse(V > 0, 1, 0)
+
+# Define g(X,D) and Y
+g_fun <- function(D, X1, X3){
+    return(tau*D + b0*(exp(X1)/(1+exp(X1))) + b1*X3)
+}
+
+Y_fun <- function(X1, X3, D){
+  epsilon <- rnorm(500, 0, 1)
+  return(g(D, X1, X3) + epsilon)
+}
+
+data2$Y <- Y_fun(data2$V1, data2$V3, data2$D)
+
+###################################
+
+independent_vars <- paste0("V", 1:20, collapse = " + ")
+formula <- as.formula(paste("D ~ ", independent_vars))
+
+# Fit probit
+probit_model <- glm(formula, 
+                    data = data2, 
+                    family = binomial(link = "probit"))
+
+# Predict propensity scores
+data2$prop_score <- predict(probit_model, type = "response")
+
+summary(probit_model)
+
+data2$w_ate <- (data2$D * data2$Y/(data2[["prop_score"]])) - ((1-data2$D) * data2$Y/(1-data2[["prop_score"]]))
+
+ate_probit <- mean(data2$w_ate)
 
 ```
