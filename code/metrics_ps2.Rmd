@@ -15,7 +15,7 @@ knitr::opts_chunk$set(echo = TRUE, tidy.opts=list(width.cutoff=60), tidy=TRUE)
 rm(list = ls())
 
 # load and require packages
-pacman::p_load(foreign, tidyverse, here, randomForest, boot, MASS)
+pacman::p_load(foreign, tidyverse, here, randomForest, boot, MASS, ivmte)
 
 # Load data
 data <- read.csv(here("data/andres_cleaned.csv"))
@@ -94,17 +94,15 @@ boot_fn <- function(data, index) {
 }
 
 # Perform bootstrap
-boot_results <- boot(data, boot_fn, R = 1000)
+#boot_results <- boot(data, boot_fn, R = 1000)
 
 # Calculate standard errors
-boot_se <- apply(boot_results$t, 2, sd)
+#boot_se <- apply(boot_results$t, 2, sd)
 ```
 
 ### Question 1f - Calculate MTE and their CI
 
-Plot the MTE estimates (as a function of u ∈ [0,1]) and pointwise confidence intervals,
-holding X constant at its sample mean values. The confidence intervals are constructed
-using the boostrap results.
+Plot the MTE estimates (as a function of u ∈ [0,1]) and pointwise confidence intervals, holding X constant at its sample mean values. The confidence intervals are constructed using the boostrap results.
 
 ```{r}
 
@@ -139,24 +137,22 @@ ggplot(plot_data, aes(x = xvar, y = marginal_effects)) +
 #m0 and m1 are formulas specifying the MTR functions for the untreated and treated arms, respectively. The symbol u in the formula refers to the unobservable latent variable in the selection equation.
 #ivlike indicates the regressions to be run to create moments to which the model is fit.
 
-mte <- ivmte(data = data,
-           target = "att",
-           m0 = ~ u + blackm + hispm + othracem + agem1 + agefstm + boy1st,
-           m1 = ~ u + blackm + hispm + othracem + agem1 + agefstm + boy1st,
-           ivlike = c(y ~ d),
-           propensity = d ~ blackm + hispm + othracem + agem1 + agefstm + boy1st + z,
-#           bootstraps = 50, 
-           link = "probit")
-
-mte$bounds.ci
+# mte <- ivmte(data = data,
+#            target = "att",
+#            m0 = ~ u + blackm + hispm + othracem + agem1 + agefstm + boy1st,
+#            m1 = ~ u + blackm + hispm + othracem + agem1 + agefstm + boy1st,
+#            ivlike = c(y ~ d),
+#            propensity = d ~ blackm + hispm + othracem + agem1 + agefstm + boy1st + z,
+# #           bootstraps = 50, 
+#            link = "probit")
+# 
+# mte$bounds.ci
 
 ```
 
 ### Question 1g - Interpret
 
-Based on the presented estimates, interpret heterogeneity of the marginal treatment effects.
-What type of parent has a larger causal effect than others? In your answer, be explicit
-about how to interpret u.
+Based on the presented estimates, interpret heterogeneity of the marginal treatment effects. What type of parent has a larger causal effect than others? In your answer, be explicit about how to interpret u.
 
 In this case, the marginal treatment effect is the difference betewen the marginal treatment response functions of treated and untreated individuals, conditional on \$U = u\$ and \$X_i = x\$. $u$ is the unobservable latent variable in the selection equation. That is, \$u\$ captures the unobservable propensity to take up treatment. The monotonicity assumption allows us to order individuals in a one-dimensional manner according to their latent propensity to take up treatment.
 
@@ -164,15 +160,13 @@ If MTE is declining in \$u\$, that means that people who are less likely to choo
 
 QUESTION - is it that $u$ is the unobservable heterogeneity ehre?
 
-### Question 2 -
+## Question 2
+
+### Question 2a
 
 ```{r}
+# Worked with Raquel Badillo-Salas
 
-```
-
-### Question 2 
-
-```{r}
 set.seed(1234)
 
 # Set the number of variables and observations
@@ -245,5 +239,70 @@ summary(probit_model)
 data2$w_ate <- (data2$D * data2$Y/(data2[["prop_score"]])) - ((1-data2$D) * data2$Y/(1-data2[["prop_score"]]))
 
 ate_probit <- mean(data2$w_ate)
+```
+
+### Question 2b - Estimate ATE using Random Forest.
+
+```{r}
+# Fit Random Forest models
+# Replace 'Y ~ .' with 'Y ~ [covariates]' to specify covariates
+rf_treatment <- randomForest(Y ~ ., data = data2[data2$D == 1, ])
+rf_control <- randomForest(Y ~ ., data = data2[data2$D == 0, ])
+
+# Predict outcomes using the fitted models
+rf_pred_treatment <- predict(rf_treatment, treatment_data)
+rf_pred_control <- predict(rf_control, control_data)
+
+# Estimate Average Treatment Effect (ATE)
+ate_rf <- mean(rf_pred_treatment) - mean(rf_pred_control)
+
+# Output the ATE
+ate_rf
+
+```
+
+### Question 2c - Estimate ATE using doubly robust estimator
+
+Estimate the ATE using the doubly robust estimator: $$
+\theta_{\text{ATE}_{\text{DR}}} = \mathbb{E} \left[ 
+\frac{(Y - g(X, 1))D}{p(X)} - 
+\frac{(Y - g(X, 0))(1 - D)}{1 - p(X)} + 
+\left( g(X, 1) - g(X, 0) \right) 
+\right]
+$$ where the nuisance functions $p(X) = \mathbb{E}[D|X]$ and $g(X, D) = \mathbb{E}[Y|X, D]$ are estimated using random forest as well.
+
+
+```{r}
+
+rf_data <- subset(data2, select = c(-Y, -w_ate, -prop_score))
+
+# Use RF to estimate p(X) 
+rf_prop <- randomForest(D ~ ., data = rf_data)
+rf_data$rf_prop_pred <- predict(rf_prop, rf_data)
+
+# Append other vars
+g1 <- rf_pred_treatment
+g0 <- rf_pred_control
+rf_data$Y <- data2$Y
+
+# Trim the prop scores
+rf_data <- rf_data %>% filter(rf_prop_pred > 0.01 & rf_prop_pred < 0.99)
+
+# Calculate the doubly robust estimator for the ATE
+doubly_robust_ate <-  mean(((rf_data$Y[D==1] - g1) * rf_data$D[D==1] / rf_data$rf_prop_pred[D==1]) - ((rf_data$Y[D==0] - g0) * rf_data$D[D==0] / rf_data$rf_prop_pred[D==0]) +  (g1 - g0))
+
+# Output the ATE
+doubly_robust_ate
+
+```
+
+
+
+
+
+### Question 2d -
+
+```{r}
+
 
 ```
