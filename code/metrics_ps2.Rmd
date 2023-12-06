@@ -119,34 +119,43 @@ kappa1 <- coef(ols)[8] #prop_score coef
 kappa2 <- coef(ols)[9] #prop_score^2 coef
 kappa3 <- coef(ols)[10] #prop_score^3 coef
 
-marginal_effects <- as.vector(xbeta1) + as.vector(kappa1) + (2 * as.vector(kappa2) * data$prop_score) + (3 * as.vector(kappa3) * (data$prop_score)^2)
+# define u 
+u <- seq(0, 1, length.out = 100)
 
-x_axis <- sort(data$prop_score)
+marginal_effects <- as.vector(xbeta1) + as.vector(kappa1) + (2 * as.vector(kappa2) * u) + (3 * as.vector(kappa3) * (u)^2)
 
 # Create a new data frame for plotting
-plot_data <- data.frame(xvar = sort(data$prop_score), marginal_effects = marginal_effects)
+plot_data <- data.frame(xvar = u, marginal_effects = marginal_effects)
 
-# Use ggplot to create the scatterplot
-ggplot(plot_data, aes(x = xvar, y = marginal_effects)) +
+# Use ggplot to plot MTEs
+plot <- ggplot(plot_data, aes(x = u, y = marginal_effects)) +
   geom_point() +
   theme_minimal() +
   labs(x = "u", y = "Marginal Effects", 
        title = "Scatterplot of Marginal Effects vs. Unobserved Heterogeneity u")
 
+kappa_1_boot <- boot_results$t[,8]
+kappa_2_boot <- boot_results$t[,9]
+kappa_3_boot <- boot_results$t[,10]
+beta_1_boot <- boot_results$t[,11:16]
+xbeta1_boot <- xprime %*% t(beta_1_boot)
 
-#m0 and m1 are formulas specifying the MTR functions for the untreated and treated arms, respectively. The symbol u in the formula refers to the unobservable latent variable in the selection equation.
-#ivlike indicates the regressions to be run to create moments to which the model is fit.
+marginal_effects_matrix <- as.vector(xbeta1_boot) + as.vector(kappa_1_boot) + (2 * u %*% t(kappa_2_boot)) + (3 * u^2 %*% t(kappa_3_boot))
 
-# mte <- ivmte(data = data,
-#            target = "att",
-#            m0 = ~ u + blackm + hispm + othracem + agem1 + agefstm + boy1st,
-#            m1 = ~ u + blackm + hispm + othracem + agem1 + agefstm + boy1st,
-#            ivlike = c(y ~ d),
-#            propensity = d ~ blackm + hispm + othracem + agem1 + agefstm + boy1st + z,
-# #           bootstraps = 50, 
-#            link = "probit")
-# 
-# mte$bounds.ci
+MTE_lb <- apply(marginal_effects_matrix, 1, function(x) quantile(x, probs = 0.025))
+MTE_ub <- apply(marginal_effects_matrix, 1, function(x) quantile(x, probs = 0.975))
+
+# Create a data frame for ggplot
+plot_data <- data.frame(u, marginal_effects, MTE_lb, MTE_ub)
+
+# Plot using ggplot
+mte_plot <- ggplot(plot_data, aes(x = u, y = marginal_effects)) +
+  geom_line() +
+  geom_ribbon(aes(ymin = MTE_lb, ymax = MTE_ub), alpha = 0.2) +
+  labs(x = "u", y = "Marginal Effects", title="MTE vs. u with confidence intervals") +
+  theme_minimal()
+
+mte_plot
 
 ```
 
