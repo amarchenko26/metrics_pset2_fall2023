@@ -307,11 +307,213 @@ doubly_robust_ate
 
 
 
+### Question 2d - Estime ATE using cross-fitting
 
-
-### Question 2d -
+Estimate the ATE using the doubly robust estimator as before but compute the first step using cross-fitting for I = 2 sample split in the following way.
 
 ```{r}
 
+# Subset the data
+data_2d <- subset(data2, select = -c(w_ate, prop_score))
+
+# Divide sample into two folds
+set.seed(123)  # Set seed for reproducibility
+n <- nrow(data_2d)
+id_div1 <- sample(1:n, n/2)
+id_div2 <- setdiff(1:n, id_div1)
+data_2d_DD_1 <- data_2d[id_div1, ]
+data_2d_DD_2 <- data_2d[id_div2, ]
+
+# Probit model for propensity score estimation
+ps_estimator <- function(df) {
+  probit_model <- glm(D ~ ., data = df, family = binomial(link = "probit"))
+  df$ps_pred <- predict(probit_model, type = "response")
+  df$ate_probit <- (df$D * df$Y / df$ps_pred) - ((1 - df$D) * df$Y / (1 - df$ps_pred))
+  return(df)
+}
+
+# Naive estimation using random forests
+theta_naive_fun <- function(df) {
+  treatment <- subset(df, D == 1, select = -c(D, ps_pred, ate_probit))
+  control <- subset(df, D == 0, select = -c(D, ps_pred, ate_probit))
+  
+  rf_treatment <- randomForest(Y ~ ., data = treatment)
+  rf_control <- randomForest(Y ~ ., data = control)
+  
+  df$g0 <- predict(rf_control, df)
+  df$g1 <- predict(rf_treatment, df)
+
+  ate_naive <- mean(df$g1 - df$g0)
+  return(df)
+}
+
+# Double Robustness (DR) estimation with trimming
+theta_DR_trim <- function(df) {
+  trimmed_df <- df %>% 
+    filter(ps_pred > 0.01, ps_pred < 0.99) %>% 
+    mutate(left = (Y - g1) * D / ps_pred - (Y - g0) * (1 - D) / (1 - ps_pred),
+           right = g1 - g0)
+  return(trimmed_df)
+}
+
+# Combined estimation function
+theta_DD <- function(df) {
+  df <- ps_estimator(df)
+  ate_probit <- mean(df$ate_probit)
+  
+  df <- theta_naive_fun(df)
+  ate_naive <- mean(df$g1 - df$g0)
+
+  df <- theta_DR_trim(df)
+  ate_DR <- mean(df$left + df$right)
+
+  return(c(ate_probit, ate_naive, ate_DR))
+}
+
+# Apply estimation on the full data and folds
+eta_j <- theta_DD(data_2d)
+eta_1 <- theta_DD(data_2d_DD_1)
+eta_2 <- theta_DD(data_2d_DD_2)
+
+# Output results
+list(eta_j, eta_1, eta_2)
+
+# Estimate ATE by DD (using DR estimations in each fold)
+ate_DD <- (eta_1[3] + eta_2[3]) / 2
+ate_DD
 
 ```
+
+### Question 2e - Repeat process
+
+Repeat process for 1000 Montecarlo simulations and compute the four estimators for each sample.
+
+```{r}
+
+# Generate the data
+n_iter <- 1000
+
+# Store bootstrap results
+ate_list <- vector("list", length = n_iter)
+
+# Iterating over bootstrap samples
+for (i in 1:n_iter) {
+  # Generate data for each iteration
+  data_ex2_iter <- as.data.frame(MASS::mvrnorm(n = 500, mu = rep(0, 20), Sigma = sigma)) 
+  V <- V_fun(data_ex2_iter$V1, data_ex2_iter$V3)
+  data_ex2_iter$D <- ifelse(V > 0, 1, 0)
+  data_ex2_iter$Y <- Y_fun(data_ex2_iter$V1, data_ex2_iter$V3, data_ex2_iter$D)
+
+  # Divide data into two groups
+  id_div1_iter <- sample(1:length(data_ex2_iter$Y), length(data_ex2_iter$Y) / 2, replace = FALSE)
+  id_div2_iter <- setdiff(1:length(data_ex2_iter$Y), id_div1_iter)
+  data_ex2_DD_1_iter <- data_2d[id_div1_iter, ]
+  data_ex2_DD_2_iter <- data_2d[id_div2_iter, ]
+
+  # Calculate coefficients
+  eta_j_iter <- theta_DD(data_ex2_iter)
+  eta_1_iter <- theta_DD(data_ex2_DD_1_iter)
+  eta_2_iter <- theta_DD(data_ex2_DD_2_iter)   
+  ate_DD_iter <- (eta_1_iter[3] + eta_2_iter[3]) / 2
+
+  # Append coefficients to the list
+  all_coef <- append(eta_j_iter, ate_DD_iter)
+  ate_list[[i]] <- all_coef
+}
+
+# Optionally save the list
+# saveRDS(ate_list, here("/ate_list.rds"))
+
+# Return list
+ate_list
+
+```
+
+
+### Question 2f - Compute empirical variance of each estimator
+
+Compute the empirical variance of each of your estimators $\hat{\sigma}^2_{\theta_k}$ where k = probit, naive, DR, DD. 
+
+```{r}
+ate_matrix <- do.call(rbind, ate_list)
+variances <- apply(ate_matrix, 2, var)
+variances
+
+```  
+
+
+### Question 2g - Plots
+
+Create four plots, one for each estimator, containing the histogram of the $\hat{\theta}_{ATE_k}$ and a Normal(.5, $\hat{\sigma}^2_{\theta_k}$) pdf.
+
+```{r}
+df_ate <- as.data.frame(ate_matrix)
+colnames(df_ate) <- c("ate_probit", "ate_naive", "ate_DR", "ate_DD")
+
+# Define the names of the columns in df_ate
+ate_names <- c("ate_probit", "ate_naive", "ate_DR", "ate_DD")
+
+# Loop through each column name to create the plots
+plots <- lapply(1:length(ate_names), function(i) {
+  ggplot(df_ate, aes_string(x = ate_names[i])) +
+    geom_density(fill = "purple", alpha = 0.5) +
+    stat_function(fun = dnorm, args = list(mean = 0.5, sd = sqrt(variances[i])), color = "blue", linewidth = 1) +
+    geom_vline(xintercept = 0.5, linetype = "dashed", color = "blue") +
+    labs(title = paste(ate_names[i], "density and Normal Distribution"),
+         x = "Values",
+         y = "Density") +
+    theme_minimal()
+})
+
+for (plot in plots) print(plot)
+
+``` 
+
+### Question 2h - Table
+
+Present a table comparing the bias and mean square error of each estimator and comment
+on which estimator performs better and why.
+
+```{r}
+
+# Function to calculate MSE
+calculate_mse <- function(n, mu, Sigma, method_ate) {
+  observed <- as.data.frame(MASS::mvrnorm(n = n, mu = mu, Sigma = Sigma))
+  return(mean((observed$V1 - method_ate)^2))
+}
+
+# Calculate bias
+bias <- c(0.5, 0.5, 0.5, 0.5) - apply(ate_matrix, 2, mean)
+
+# Initialize method names and corresponding ATEs
+methods <- c("Probit", "Naive", "DR", "DD")
+ates <- c(df_ate$ate_probit, df_ate$ate_naive, df_ate$ate_DR, df_ate$ate_DD)
+
+# Calculate MSE for each method
+mse_values <- sapply(1:4, function(i) calculate_mse(1000, 0.5, variances[i], ates[i]))
+
+# Create a data frame
+data <- data.frame(
+  Method = methods,
+  Bias = round(bias, 4), 
+  MSE = round(mse_values, 4)
+)
+
+# Print the formatted table
+knitr::kable(data, format = "markdown", caption = "Bias and MSE for Different Methods")
+
+``` 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
