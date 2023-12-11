@@ -1,6 +1,8 @@
 ---
 title: "Applied Metrics Empirical P-Set 2, Fall 2023"
-output: pdf_document
+output:
+  bookdown::pdf_document2:
+    latex_engine: xelatex
 date: "2023-11-29"
 ---
 
@@ -15,7 +17,7 @@ knitr::opts_chunk$set(echo = TRUE, tidy.opts=list(width.cutoff=60), tidy=TRUE)
 rm(list = ls())
 
 # load and require packages
-pacman::p_load(foreign, tidyverse, here, randomForest, boot, MASS, ivmte)
+pacman::p_load(foreign, tidyverse, formatR, here, randomForest, boot, MASS, ivmte, aod)
 
 # Load data
 data <- read.csv(here("data/andres_cleaned.csv"))
@@ -36,7 +38,7 @@ The structural selection equation describes the switch from $D = 0$ to $D=1$ in 
 
 Clarify a set of assumptions that the marginal treatment effect $M(x,u)$, $u \in (0,1)$ can be identified by the derivative of the OLS regression equation WRT the propensity score: $$MTE(x, u) = \frac{\partial}{\partial p}\bigg|_{p=u} \left( x'\beta_0 + px'\beta_1 + \kappa_1p + \kappa_2p^2 + \kappa_3p^3 \right)$$
 
-The assumptions are: XXXXX
+The assumptions are that (1) the instrument is independent $(U_1, U_0, V) \perp Z|X$, (2) that $\mu_D(Z,X)$ has a nondegenerate distribution given X, (3) that scalar V is continuously distributed, (4) $E(|Y(1)|)$ and $E(|Y(0)|)$ are finite, and (5) $0 < P(D=1|X) <1$. 
 
 ### Question 1c - Estimate propensity score
 
@@ -94,10 +96,10 @@ boot_fn <- function(data, index) {
 }
 
 # Perform bootstrap
-#boot_results <- boot(data, boot_fn, R = 1000)
+boot_results <- boot(data, boot_fn, R = 1000)
 
 # Calculate standard errors
-#boot_se <- apply(boot_results$t, 2, sd)
+boot_se <- apply(boot_results$t, 2, sd)
 ```
 
 ### Question 1f - Calculate MTE and their CI
@@ -115,8 +117,8 @@ xprime <- matrix(covariate_means, nrow = 1, ncol = 6) #transpose to make 1x6
 beta1 <- matrix(beta1, nrow = 6, ncol = 1) #transpose to make 6x1
 xbeta1 <- xprime %*% beta1
 
-kappa1 <- coef(ols)[8] #prop_score coef
-kappa2 <- coef(ols)[9] #prop_score^2 coef
+kappa1 <- coef(ols)[8]  #prop_score coef
+kappa2 <- coef(ols)[9]  #prop_score^2 coef
 kappa3 <- coef(ols)[10] #prop_score^3 coef
 
 # define u 
@@ -161,13 +163,44 @@ mte_plot
 
 ### Question 1g - Interpret
 
-Based on the presented estimates, interpret heterogeneity of the marginal treatment effects. What type of parent has a larger causal effect than others? In your answer, be explicit about how to interpret u.
+Question: Based on the presented estimates, interpret heterogeneity of the marginal treatment effects. What type of parent has a larger causal effect than others? In your answer, be explicit about how to interpret u.
 
-In this case, the marginal treatment effect is the difference betewen the marginal treatment response functions of treated and untreated individuals, conditional on \$U = u\$ and \$X_i = x\$. $u$ is the unobservable latent variable in the selection equation. That is, \$u\$ captures the unobservable propensity to take up treatment. The monotonicity assumption allows us to order individuals in a one-dimensional manner according to their latent propensity to take up treatment.
+<!--The marginal treatment effect is the difference between the marginal treatment response functions of treated and untreated individuals, conditional on \$U = u\$ and \$X_i = x\$.  The monotonicity assumption allows us to order individuals in a one-dimensional manner according to their latent propensity to take up treatment.If MTE is declining in \$u\$, that means that people who are less likely to choose treatment experience smaller treatment effects than those who are more likely to choose treatment. -->
 
-If MTE is declining in \$u\$, that means that people who are less likely to choose treatment experience smaller treatment effects than those who are more likely to choose treatment.
+$u$ is the unobservable latent variable in the selection equation. That is, $u$ captures the unobservable propensity to take up treatment. The higher the $u$, the less likely the person is to have had more than two kids without having had twins.
+ 
+If MTE is increasing in $u$, then people who are less likely to choose treatment experience larger treatments effects. In this case, MTE is increasing in $u$, implying that mothers who are already less likely to have a third child on their own (without the presence of twins) experience more impacts on their income. 
 
-QUESTION - is it that $u$ is the unobservable heterogeneity ehre?
+
+
+### Question 1h - Based on the estimation results of part (b), test heterogeneity of MTE in u.
+
+```{r}
+
+wald_heter <- wald.test(b = coef(ols), Sigma = vcov(ols), Terms = 15:16)
+wald_heter
+
+```
+
+Since non-zero polynomial terms in the MTE equation are what could give a non-linear shape to the MTE function, we can test whether the MTEs are heterogeneous by testing whether $\kappa_2$ and $\kappa_3$ are equal to zero. The Wald test above rejects the Null that MTEs are homogeneous. 
+
+
+
+### Question 1i - Estimate ATE
+
+Question: Under the specifications of (2) and MTE identification by (5), explain how you identify and estimate the average treatment effect. In your answer, address any concerns about credibility on the ATE estimate.
+
+Answer: I interpret this question as asking me to explain how to identify the ATE, not actually compute the ATE. I would compute the ATE as the average of all the MTEs, integrated over the propensity score: $ATE = \int_p \text{MTE} dp$. The credibility of the ATE
+
+
+### Question 1j - Non-parametric function of propensity score $K(p)$
+
+
+Question: To assess robustness of the results relying on the parametric form in 2, consider estimating MTE using partial linear regression: $Y_i = X'_i \beta_0 + \hat{p}_i X_i' \beta_1 + K(p)$, where $K(p)$ is a nonparamtetric function of the propensity score. Maintain the propensity score estimates as before, estimate MTE by running a partial linear regression on (6). In your answer, explain how you implement the partial linear regression and how you choose the smoothing parameters (bandwith).
+
+Answer: 
+
+
 
 ## Question 2
 
@@ -225,7 +258,7 @@ g_fun <- function(D, X1, X3){
 
 Y_fun <- function(X1, X3, D){
   epsilon <- rnorm(500, 0, 1)
-  return(g(D, X1, X3) + epsilon)
+  return(g_fun(D, X1, X3) + epsilon)
 }
 
 data2$Y <- Y_fun(data2$V1, data2$V3, data2$D)
@@ -253,14 +286,16 @@ ate_probit <- mean(data2$w_ate)
 ### Question 2b - Estimate ATE using Random Forest.
 
 ```{r}
+data2 <- subset(data2, select = c(-w_ate, -prop_score))
+
 # Fit Random Forest models
 # Replace 'Y ~ .' with 'Y ~ [covariates]' to specify covariates
 rf_treatment <- randomForest(Y ~ ., data = data2[data2$D == 1, ])
 rf_control <- randomForest(Y ~ ., data = data2[data2$D == 0, ])
 
 # Predict outcomes using the fitted models
-rf_pred_treatment <- predict(rf_treatment, treatment_data)
-rf_pred_control <- predict(rf_control, control_data)
+rf_pred_treatment <- predict(rf_treatment, data2)
+rf_pred_control <- predict(rf_control, data2)
 
 # Estimate Average Treatment Effect (ATE)
 ate_rf <- mean(rf_pred_treatment) - mean(rf_pred_control)
@@ -283,7 +318,7 @@ $$ where the nuisance functions $p(X) = \mathbb{E}[D|X]$ and $g(X, D) = \mathbb{
 
 ```{r}
 
-rf_data <- subset(data2, select = c(-Y, -w_ate, -prop_score))
+rf_data <- subset(data2, select = c(-Y))
 
 # Use RF to estimate p(X) 
 rf_prop <- randomForest(D ~ ., data = rf_data)
@@ -298,7 +333,7 @@ rf_data$Y <- data2$Y
 rf_data <- rf_data %>% filter(rf_prop_pred > 0.01 & rf_prop_pred < 0.99)
 
 # Calculate the doubly robust estimator for the ATE
-doubly_robust_ate <-  mean(((rf_data$Y[D==1] - g1) * rf_data$D[D==1] / rf_data$rf_prop_pred[D==1]) - ((rf_data$Y[D==0] - g0) * rf_data$D[D==0] / rf_data$rf_prop_pred[D==0]) +  (g1 - g0))
+doubly_robust_ate <-  mean(((rf_data$Y - g1) * rf_data$D / rf_data$rf_prop_pred) - ((rf_data$Y - g0) * (1-rf_data$D) / (1-rf_data$rf_prop_pred)) +  (g1 - g0))
 
 # Output the ATE
 doubly_robust_ate
@@ -313,16 +348,15 @@ Estimate the ATE using the doubly robust estimator as before but compute the fir
 
 ```{r}
 
-# Subset the data
-data_2d <- subset(data2, select = -c(w_ate, prop_score))
+colnames(data2) # has only V, D, Y
 
 # Divide sample into two folds
 set.seed(123)  # Set seed for reproducibility
-n <- nrow(data_2d)
+n <- nrow(data2)
 id_div1 <- sample(1:n, n/2)
 id_div2 <- setdiff(1:n, id_div1)
-data_2d_DD_1 <- data_2d[id_div1, ]
-data_2d_DD_2 <- data_2d[id_div2, ]
+data_2d_DD_1 <- data2[id_div1, ]
+data_2d_DD_2 <- data2[id_div2, ]
 
 # Probit model for propensity score estimation
 ps_estimator <- function(df) {
@@ -371,7 +405,7 @@ theta_DD <- function(df) {
 }
 
 # Apply estimation on the full data and folds
-eta_j <- theta_DD(data_2d)
+eta_j <- theta_DD(data2)
 eta_1 <- theta_DD(data_2d_DD_1)
 eta_2 <- theta_DD(data_2d_DD_2)
 
@@ -407,8 +441,8 @@ for (i in 1:n_iter) {
   # Divide data into two groups
   id_div1_iter <- sample(1:length(data_ex2_iter$Y), length(data_ex2_iter$Y) / 2, replace = FALSE)
   id_div2_iter <- setdiff(1:length(data_ex2_iter$Y), id_div1_iter)
-  data_ex2_DD_1_iter <- data_2d[id_div1_iter, ]
-  data_ex2_DD_2_iter <- data_2d[id_div2_iter, ]
+  data_ex2_DD_1_iter <- data2[id_div1_iter, ]
+  data_ex2_DD_2_iter <- data2[id_div2_iter, ]
 
   # Calculate coefficients
   eta_j_iter <- theta_DD(data_ex2_iter)
@@ -504,8 +538,7 @@ knitr::kable(data, format = "markdown", caption = "Bias and MSE for Different Me
 
 ``` 
 
-
-
+We can see from the table that the DD estimator performs the best: it has the lowest MSE and bias values out of all the estimators. 
 
 
 
