@@ -30,9 +30,9 @@ set.seed(1234) # For reproducibility
 
 ### Question 1a - Relate structural equation and probit regression
 
-Suppose we specify the potential outcome equations as $Y_i(1) = X'_i \theta_1 + \epsilon_{1i}$ and $Y_i(0) = X'_i \theta_0 + \epsilon_{0i}$, and the structural selection equation as $D_i = 1 \{u(X_i,Z_i) \geq V_i \}$. where $u(X_i,Z_i) - V_i$ is the latent utility derived from additional children.
+Question: Suppose we specify the potential outcome equations as $Y_i(1) = X'_i \theta_1 + \epsilon_{1i}$ and $Y_i(0) = X'_i \theta_0 + \epsilon_{0i}$, and the structural selection equation as $D_i = 1 \{u(X_i,Z_i) \geq V_i \}$. where $u(X_i,Z_i) - V_i$ is the latent utility derived from additional children. How do you relate the structural selection equation and the probit regression of (1)? Explain your answer.
 
-The structural selection equation describes the switch from $D = 0$ to $D=1$ in terms of utility, i.e., whether, as a function of your observables and instrument, the family has a higher utility than some level of having more than three children. The propensity score quantifies this probability, capturing the likelihood, given your observables and instrument value, of having $D = 1$.
+Answer: The structural selection equation describes the switch from $D = 0$ to $D=1$ in terms of utility. In other words, the structural equation implies that the family will have three or more children if, given their observables $X$ and instrument $Z$, the family's utility of doing so is higher than some level $V_i$. The propensity score quantifies this probability, capturing the likelihood, given your observables and instrument value, of having three of more children ($D = 1$).
 
 ### Question 1b - Assumptions for MTE
 
@@ -100,11 +100,13 @@ boot_results <- boot(data, boot_fn, R = 1000)
 
 # Calculate standard errors
 boot_se <- apply(boot_results$t, 2, sd)
+boot_se
+
 ```
 
 ### Question 1f - Calculate MTE and their CI
 
-Plot the MTE estimates (as a function of u ∈ [0,1]) and pointwise confidence intervals, holding X constant at its sample mean values. The confidence intervals are constructed using the boostrap results.
+Plot the MTE estimates (as a function of u ∈ [0,1]) and pointwise confidence intervals, holding X constant at its sample mean values. The confidence intervals are constructed using the bootstrap results.
 
 ```{r}
 
@@ -167,7 +169,7 @@ Question: Based on the presented estimates, interpret heterogeneity of the margi
 
 <!--The marginal treatment effect is the difference between the marginal treatment response functions of treated and untreated individuals, conditional on \$U = u\$ and \$X_i = x\$.  The monotonicity assumption allows us to order individuals in a one-dimensional manner according to their latent propensity to take up treatment.If MTE is declining in \$u\$, that means that people who are less likely to choose treatment experience smaller treatment effects than those who are more likely to choose treatment. -->
 
-$u$ is the unobservable latent variable in the selection equation. That is, $u$ captures the unobservable propensity to take up treatment. The higher the $u$, the less likely the person is to have had more than two kids without having had twins.
+Answer: $u$ is the unobservable latent variable in the selection equation. That is, $u$ captures the unobservable propensity to take up treatment. The higher the $u$, the less likely the person is to have had more than two kids without having had twins.
  
 If MTE is increasing in $u$, then people who are less likely to choose treatment experience larger treatments effects. In this case, MTE is increasing in $u$, implying that mothers who are already less likely to have a third child on their own (without the presence of twins) experience more impacts on their income. 
 
@@ -182,7 +184,7 @@ wald_heter
 
 ```
 
-Since non-zero polynomial terms in the MTE equation are what could give a non-linear shape to the MTE function, we can test whether the MTEs are heterogeneous by testing whether $\kappa_2$ and $\kappa_3$ are equal to zero. The Wald test above rejects the Null that MTEs are homogeneous. 
+Answer: Since non-zero polynomial terms in the MTE equation are what could give a non-linear shape to the MTE function, we can test whether the MTEs are heterogeneous by testing whether $\kappa_2$ and $\kappa_3$ are equal to zero. The Wald test above rejects the Null that MTEs are homogeneous. 
 
 
 
@@ -190,7 +192,7 @@ Since non-zero polynomial terms in the MTE equation are what could give a non-li
 
 Question: Under the specifications of (2) and MTE identification by (5), explain how you identify and estimate the average treatment effect. In your answer, address any concerns about credibility on the ATE estimate.
 
-Answer: I interpret this question as asking me to explain how to identify the ATE, not actually compute the ATE. I would compute the ATE as the average of all the MTEs, integrated over the propensity score: $ATE = \int_p \text{MTE} dp$. The credibility of the ATE
+Answer: I interpret this question as asking me to explain how to compute the ATE, not to actually  do it. I would compute the ATE as the average of all the MTEs, integrated over the propensity score: $ATE = \int_p \text{MTE} dp$. There are concerns about the credibility of the ATE because of the heterogeneity of the MTEs -- since the ATE is just the average, only reporting the ATE masks the variation for different subgroups. 
 
 
 ### Question 1j - Non-parametric function of propensity score $K(p)$
@@ -281,6 +283,7 @@ summary(probit_model)
 data2$w_ate <- (data2$D * data2$Y/(data2[["prop_score"]])) - ((1-data2$D) * data2$Y/(1-data2[["prop_score"]]))
 
 ate_probit <- mean(data2$w_ate)
+ate_probit
 ```
 
 ### Question 2b - Estimate ATE using Random Forest.
@@ -360,7 +363,8 @@ data_2d_DD_2 <- data2[id_div2, ]
 
 # Probit model for propensity score estimation
 ps_estimator <- function(df) {
-  probit_model <- glm(D ~ ., data = df, family = binomial(link = "probit"))
+  probit_model <- glm(D ~ V1 + V2 + V3 + V4 + V5 + V6 + V7 + V8 + V9 + V10 + V11 + 
+    V12 + V13 + V14 + V15 + V16 + V17 + V18 + V19 + V20, data = df, family = binomial(link = "probit"))
   df$ps_pred <- predict(probit_model, type = "response")
   df$ate_probit <- (df$D * df$Y / df$ps_pred) - ((1 - df$D) * df$Y / (1 - df$ps_pred))
   return(df)
@@ -384,7 +388,7 @@ theta_naive_fun <- function(df) {
 # Double Robustness (DR) estimation with trimming
 theta_DR_trim <- function(df) {
   trimmed_df <- df %>% 
-    filter(ps_pred > 0.01, ps_pred < 0.99) %>% 
+    filter(ps_pred > 0.01 & ps_pred < 0.99) %>% 
     mutate(left = (Y - g1) * D / ps_pred - (Y - g0) * (1 - D) / (1 - ps_pred),
            right = g1 - g0)
   return(trimmed_df)
@@ -455,12 +459,6 @@ for (i in 1:n_iter) {
   ate_list[[i]] <- all_coef
 }
 
-# Optionally save the list
-# saveRDS(ate_list, here("/ate_list.rds"))
-
-# Return list
-ate_list
-
 ```
 
 
@@ -472,7 +470,6 @@ Compute the empirical variance of each of your estimators $\hat{\sigma}^2_{\thet
 ate_matrix <- do.call(rbind, ate_list)
 variances <- apply(ate_matrix, 2, var)
 variances
-
 ```  
 
 
@@ -538,7 +535,7 @@ knitr::kable(data, format = "markdown", caption = "Bias and MSE for Different Me
 
 ``` 
 
-We can see from the table that the DD estimator performs the best: it has the lowest MSE and bias values out of all the estimators. 
+I would prefer the DR estimator because it has the smallest MSE out of all the estimators, even though the probit has the smallest bias in absolute value. Since MSE is a loss function that minimizes $Var(T) + Bias(T)^2$ for an estimator $T$, minimizing MSE means that the DR estimator will be neither too biased nor have too large variance. This is compared to the probit estimator, which does has smaller bias, but it might come at the cost of higher variance. 
 
 
 
